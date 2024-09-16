@@ -1,0 +1,164 @@
+---
+title: "Lasso_OLS_comparison"
+author: "Birnir"
+format: pdf
+editor: visual
+---
+
+### Step 1: Simulate the Data
+
+We will generate a simple dataset with two predictor variables (`x1`, `x2`) and a response variable (`y`), which will have a known linear relationship.
+
+```{r}
+# Set the seed for reproducibility
+set.seed(123)
+
+# Simulate data
+n <- 100  # number of observations
+x1 <- rnorm(n)  # predictor 1
+x2 <- rnorm(n)  # predictor 2
+x3 = rnorm(n)
+
+# Response variable with some noise
+y <- 3 + 0.5 * x1 + 2 * x2 + rnorm(n)
+
+# Combine into a data frame
+dat <- data.frame(x1 = x1, x2 = x2, x3 = x3, y = y)
+
+# View the first few rows of the data
+head(dat)
+```
+
+### Step 2: Split the Data into Training and Test Sets
+
+```{r}
+# Load the required package
+library(caret)
+
+# Split the data: 70% for training, 30% for testing
+set.seed(123)
+train_index <- createDataPartition(dat$y, p = 0.7, list = FALSE)
+train_data <- dat[train_index, ]
+test_data <- dat[-train_index, ]
+```
+
+### Step 3: Fit the OLS (Ordinary Least Squares) Model
+
+```{r}
+# Fit an OLS model
+ols_model <- lm(y ~ x1 + x2 + x3, data = train_data)
+
+# View the model summary to see the coefficients
+summary(ols_model)
+
+# Predict on the test data
+ols_predictions <- predict(ols_model, newdata = test_data)
+
+```
+
+### Step 4: Fit the Lasso Regression Model using `glmnet`.
+
+Use cross-validation to find the optimal value of `lambda`.
+
+```{r}
+# Load the glmnet package
+library(glmnet)
+
+# Prepare the predictors and response variable
+X_train <- as.matrix(train_data[, c("x1", "x2", "x3")])  # predictors for training
+y_train <- train_data$y  # response for training
+X_test <- as.matrix(test_data[, c("x1", "x2", "x3")])  # predictors for testing
+
+# Fit a Lasso model with cross-validation to find the best lambda
+lasso_cv_model <- cv.glmnet(X_train, y_train, alpha = 1)
+#cv.glmnet(): This function fits a generalized linear model using Lasso regularization and performs cross-validation to select the best lambda.
+
+#alpha = 1: This sets the model to use Lasso regression. In the glmnet function, alpha determines the type of regularization:
+#alpha = 1: Lasso (L1 regularization).
+#alpha = 0: Ridge regression (L2 regularization).
+#alpha between 0 and 1: Elastic Net (a mix of both Lasso and Ridge).
+
+
+# Find the best lambda
+best_lambda <- lasso_cv_model$lambda.min
+
+# Print the best lambda
+print(paste("Best Lambda (Lasso):", best_lambda))
+
+# Fit the final Lasso model using the best lambda
+lasso_model <- glmnet(X_train, y_train, alpha = 1, lambda = .09)
+#Tuning of lambda - making the penalty bigger (more bias less variance)
+#lasso_model <- glmnet(X_train, y_train, alpha = 1, lambda = .9)
+
+
+# Predict on the test data using the Lasso model
+lasso_predictions <- predict(lasso_model, newx = X_test)
+
+```
+
+### Step 5: Calculate Comparison Metrics
+
+There are several metrics to evaluate model performance
+
+1.  MSE (**Mean Squared Error)**
+
+<!-- -->
+
+2.  **RMSE (Root Mean Squared Error)**: The square root of MSE, making it more interpretable in the same units as the dependent variable. Lower RMSE indicates better fit.
+
+3.  **MAE (Mean Absolute Error)**: Measures the average absolute difference between predicted and actual values. Unlike MSE, it doesn't square the errors, so it's less sensitive to large (outlier) errors. Lower MSE indicates better fit.
+
+4.  **R-squared (R²)**: Measures how well the model explains the variability of the response variable. Higher values indicate that the model explains more variance in the data.
+
+```{r}
+# Load required libraries
+library(glmnet)
+library(caret)
+
+# Function to calculate alternative metrics
+calculate_metrics <- function(actual, predicted) {
+  mse <- mean((actual - predicted)^2)
+  rmse <- sqrt(mse)
+  mae <- mean(abs(actual - predicted))
+  r_squared <- cor(actual, predicted)^2
+  return(data.frame(MSE = mse, RMSE = rmse, MAE = mae, R2 = r_squared))
+}
+
+# OLS Model Metrics
+ols_predictions <- predict(ols_model, newdata = test_data)
+ols_metrics <- calculate_metrics(test_data$y, ols_predictions)
+
+# Lasso Model Metrics
+lasso_predictions <- as.vector(predict(lasso_model, newx = X_test))
+lasso_metrics <- calculate_metrics(test_data$y, lasso_predictions)
+
+# Combine metrics into a data frame
+metrics_comparison <- rbind(
+  cbind(Model = "OLS", ols_metrics),
+  cbind(Model = "Lasso", lasso_metrics)
+)
+
+# Print the comparison of metrics
+print(metrics_comparison)
+```
+
+### Step 6: Plot the Metrics
+
+```{r}
+# Load ggplot2 for plotting
+library(ggplot2)
+
+# Convert the data to a long format for easier plotting
+metrics_long <- reshape2::melt(metrics_comparison, id.vars = "Model")
+
+# Plot the comparison of metrics
+ggplot(metrics_long, aes(x = variable, y = value, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Model Performance Metrics: OLS vs Lasso",
+       x = "Metric",
+       y = "Value") +
+  theme_minimal() +
+  scale_fill_manual(values = c("OLS" = "blue", "Lasso" = "red"))
+```
+
+-   
