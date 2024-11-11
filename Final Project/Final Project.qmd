@@ -1,0 +1,115 @@
+---
+title: "Final Project 729B"
+author: "Isabelle Gibson"
+format: html
+editor: visual
+---
+
+```{r load packages}
+
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(tidytext)
+library(ggplot2)
+library(wordcloud)
+```
+
+```{r}
+api_key <- "32f8aaf726424be587b398259c0f963c"
+```
+
+```{r gather articles on BLM protests}
+fetch_articles <- function(query, api_key, language = "en", page_size = 100, pages = 1) {
+  articles <- data.frame()
+  
+  for (page in 1:pages) {
+    # Make the API request
+    response <- GET(
+      url = "https://newsapi.org/v2/everything",
+      query = list(
+        q = query,
+        language = language,
+        pageSize = page_size,
+        page = page,
+        apiKey = api_key
+      )
+    )
+    
+    # Parse the JSON response
+    data <- fromJSON(content(response, as = "text"), flatten = TRUE)
+    
+    # Check if there are articles and bind them to the main dataframe
+    if (!is.null(data$articles)) {
+      articles <- bind_rows(articles, data$articles)
+    }
+  }
+  return(articles)
+}
+
+blm_articles <- fetch_articles("Black Lives Matter protests", api_key, pages = 5)
+
+# Combine title, description, and content for text analysis
+blm_articles <- blm_articles %>% 
+  mutate(text = paste(title, description, content, sep = " ")) %>%
+  select(source.name, text)  # Keep only the source name and text
+
+# Unnest tokens (split text into individual words)
+blm_words <- blm_articles %>%
+  unnest_tokens(word, text)
+
+# Remove stopwords and custom irrelevant words
+data("stop_words")
+irrelevant_words <- c("li", "chars", "amp", "watch", "https", "t.co", "rt")  # Add any other irrelevant words here
+
+```
+
+```{r clean the text remove stop words}
+
+blm_words <- blm_words %>%
+  anti_join(stop_words, by = "word") %>%   # Remove common stopwords
+  filter(!word %in% irrelevant_words) %>%  # Remove custom irrelevant words
+  filter(nchar(word) > 2)                  # Remove short words (e.g., "li")
+```
+
+```{r word cloud for each news source}
+# Count word frequency for overall word cloud
+word_counts <- blm_words %>%
+  count(word, sort = TRUE)
+
+# Generate the word cloud for all articles
+set.seed(1234)
+wordcloud(words = word_counts$word, freq = word_counts$n, min.freq = 2,
+          max.words = 100, random.order = FALSE, rot.per = 0.35,
+          colors = brewer.pal(8, "Dark2"))
+```
+
+```{r Word cloud by source}
+
+library(ggplot2)
+# Count word frequency by source
+word_counts_by_source <- blm_words %>%
+  group_by(source.name) %>%
+  count(word, sort = TRUE)
+
+# Loop through each source to create individual word clouds
+sources <- unique(blm_words$source.name)
+for (source in sources) {
+  source_words <- word_counts_by_source %>% filter(source.name == source)
+  print(paste("Word Cloud for", source))
+  wordcloud(words = source_words$word, freq = source_words$n, min.freq = 2,
+            max.words = 100, random.order = FALSE, rot.per = 0.35,
+            colors = brewer.pal(8, "Dark2"))
+}
+```
+
+```{r}
+# Optional: Top Words Bar Plot
+top_words <- word_counts %>% top_n(10, n)
+
+ggplot(top_words, aes(x = reorder(word, n), y = n)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Top 10 Most Frequent Words in BLM Protest Coverage",
+       x = "Words", y = "Frequency")
+```
